@@ -52,7 +52,7 @@ class QuoteResponse(BaseModel):
     discountCents: int
     taxCents: int
     shippingCents: int
-    grandTotalCents: int
+    grandTotal: float
     promoApplied: bool
 
 
@@ -108,6 +108,6 @@ async def create_quote(req: QuoteRequest) -> QuoteResponse:
         discountCents=discount,
         taxCents=tax,
         shippingCents=shipping,
-        grandTotalCents=subtotal + tax + shipping,
+        grandTotal=(subtotal + tax + shipping) / 100,
         promoApplied=promo_applied,
     )
