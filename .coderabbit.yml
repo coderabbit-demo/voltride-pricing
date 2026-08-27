@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# voltride-pricing produces the quote contract consumed by three sibling
+# repos (catalog, cart, orders) and consumes voltride-inventory's stock
+# records. Consumers hand-maintain local copies of the quote shape — no
+# compiler spans the repo boundary, so wire-format changes are only ever
+# caught by review.
+
+language: "en-US"
+
+tone_instructions: >-
+  Prioritize cross-repo compatibility over style. When this service's HTTP
+  contract changes, name every consumer repository and file that breaks and
+  the runtime symptom. Never rate a contract change low risk because the
+  diff is small.
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  request_changes_workflow: true
+
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Treat ANY change to a wire-format element this repo produces — a
+        JSON field name, field type or UNIT (all money fields are integer
+        cents; converting to dollars or float is breaking even if the name
+        barely changes), the discountPercent sign convention (negative =
+        surcharge), endpoint path, or status code — as a BREAKING CHANGE for
+        the linked repositories, and enumerate every consumer exhaustively;
+        finding one broken consumer does not end the analysis. QuoteResponse
+        is decoded by coderabbit-demo/voltride-cart
+        (src/clients/pricingClient.ts — totals render undefined/NaN),
+        coderabbit-demo/voltride-catalog (src/clients/pricingClient.ts —
+        product detail pricing), and coderabbit-demo/voltride-orders
+        (clients.go Quote struct — Go decodes missing JSON keys SILENTLY as
+        zero values, so a renamed grandTotalCents silently stores and
+        "charges" $0.00 orders; silent consumers must be named even when a
+        louder failure exists, as they are the most dangerous). The strict
+        Pydantic QuoteRequest means renaming or dropping a request field
+        breaks every caller with 422s. Severity for an unaccompanied
+        contract change is CRITICAL — the blast radius lives in other
+        repositories, so a small diff means higher risk, not lower.
+    - path: "inventory_client.py"
+      instructions: >-
+        Local copy of voltride-inventory's stock record contract.
+        data.get("stockCount", 0) silently reads 0 if inventory renames the
+        field — flag any drift between this file and what
+        coderabbit-demo/voltride-inventory actually serves.
+
+  labeling_instructions:
+    - label: "breaking-change"
+      instructions: >-
+        Apply when the PR changes any wire-format element of the quote
+        request or response (field name, type, unit, sign convention) that
+        the linked consumer repositories decode.
+    - label: "cross-repo-impact"
+      instructions: >-
+        Apply when a change here alters the runtime behavior of another
+        VoltRide repo, even if every payload still parses (e.g. unit or
+        sign-convention changes).
+
+  pre_merge_checks:
+    custom_checks:
+      - name: "Cross-repo contract compatibility"
+        mode: "error"
+        instructions: >-
+          FAIL this check if the PR modifies any wire-format element of the
+          quote request or response — a field name, a field's type or unit
+          (cents vs dollars, int vs float), the discountPercent sign
+          convention, an endpoint path/method, or a status code — or drifts
+          inventory_client.py away from what voltride-inventory actually
+          serves. Consumers live in the linked repositories (voltride-cart,
+          voltride-catalog, voltride-orders) and CANNOT be fixed in this PR,
+          so a contract change may only PASS when the PR description links
+          coordinated pull requests updating every affected consumer repo,
+          or the change is demonstrably additive. Enumerate ALL consumers:
+          Go consumers fail silently (missing keys decode as zero values),
+          so they must be checked even when a TypeScript or Pydantic
+          consumer already fails loudly.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+  linked_repositories:
+    - repository: "coderabbit-demo/voltride-inventory"
+      instructions: >-
+        Producer this repo consumes: GET /api/stock/:id (stockCount) read in
+        inventory_client.py to apply clearance discounts (>20) and low-stock
+        surcharges (<=2). A missing key silently reads as 0.
+    - repository: "coderabbit-demo/voltride-catalog"
+      instructions: >-
+        Consumer of this repo's quotes: src/clients/pricingClient.ts decodes
+        lineItems[].unitPriceCents and discountPercent for product detail
+        pricing.
+    - repository: "coderabbit-demo/voltride-cart"
+      instructions: >-
+        Consumer of this repo's quotes: src/clients/pricingClient.ts decodes
+        every *Cents total for the cart totals box; also builds the strict
+        QuoteRequest (items[].basePriceCents, promoCode).
+    - repository: "coderabbit-demo/voltride-orders"
+      instructions: >-
+        Consumer of this repo's quotes: clients.go Quote struct decodes
+        lineItems and grandTotalCents — the amount charged. Go decodes
+        missing JSON keys silently as 0.
