@@ -63,6 +63,7 @@ def health():
 
 @app.post("/api/quotes", response_model=QuoteResponse)
 async def create_quote(req: QuoteRequest) -> QuoteResponse:
+    """Create a quote with all monetary values represented in integer cents."""
     line_items: List[QuoteLineItem] = []
     subtotal = 0
     full_price_total = 0
